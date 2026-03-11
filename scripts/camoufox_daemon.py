@@ -325,6 +325,7 @@ class PlaywrightMcpBridge:
         *,
         playwright_mcp_bin: Path,
         output_dir: Path,
+        user_data_dir: Path,
         headless: bool,
         proxy_server: Optional[str],
         exclude_ubo: bool,
@@ -335,6 +336,7 @@ class PlaywrightMcpBridge:
     ) -> None:
         self.playwright_mcp_bin = playwright_mcp_bin
         self.output_dir = output_dir
+        self.user_data_dir = user_data_dir
         self.headless = headless
         self.proxy_server = proxy_server
         self.exclude_ubo = exclude_ubo
@@ -359,6 +361,7 @@ class PlaywrightMcpBridge:
         return {
             "playwrightMcpBin": str(self.playwright_mcp_bin),
             "outputDir": str(self.output_dir),
+            "userDataDir": str(self.user_data_dir),
             "endpointRunning": bool(self.endpoint_proc and self.endpoint_proc.poll() is None),
             "mcpRunning": bool(self.mcp_proc and self.mcp_proc.poll() is None),
             "mcpReady": bool(self.mcp_ready),
@@ -451,8 +454,11 @@ class PlaywrightMcpBridge:
         if self.exclude_ubo:
             launch_kwargs["exclude_addons"] = [DefaultAddons.UBO]
 
+        self.user_data_dir.mkdir(parents=True, exist_ok=True)
         options = strip_none(launch_options(**launch_kwargs))
-        payload = base64.b64encode(orjson.dumps(to_camel_case_dict(options))).decode("ascii")
+        payload_options = to_camel_case_dict(options)
+        payload_options["_userDataDir"] = str(self.user_data_dir)
+        payload = base64.b64encode(orjson.dumps(payload_options)).decode("ascii")
 
         launch_script = LOCAL_DATA / "launchServer.js"
         if not launch_script.exists():
@@ -883,6 +889,7 @@ def main() -> int:
     mcp_bridge = PlaywrightMcpBridge(
         playwright_mcp_bin=playwright_mcp_bin,
         output_dir=playwright_mcp_output_dir,
+        user_data_dir=user_data_dir,
         headless=bool(args.headless),
         proxy_server=(str(args.proxy_server).strip() or None),
         exclude_ubo=bool(args.exclude_ubo),
