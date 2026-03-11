@@ -1,0 +1,96 @@
+{
+  "id": "camoufox-claw",
+  "name": "Camoufox Claw",
+  "description": "Operate a single-instance Camoufox browser daemon through OpenClaw tools.",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "pythonBin": {
+        "type": "string",
+        "description": "Python executable used to run camoufoxctl."
+      },
+      "ctlPath": {
+        "type": "string",
+        "description": "Absolute path to camoufoxctl.py."
+      },
+      "daemonPath": {
+        "type": "string",
+        "description": "Absolute path to camoufox_daemon.py."
+      },
+      "host": {
+        "type": "string",
+        "description": "Loopback host for daemon RPC."
+      },
+      "port": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 65535,
+        "description": "Daemon RPC port."
+      },
+      "runtimeDir": {
+        "type": "string",
+        "description": "Runtime directory for lock/pid/log files."
+      },
+      "userDataDir": {
+        "type": "string",
+        "description": "Camoufox profile directory."
+      },
+      "targetOs": {
+        "type": "string",
+        "enum": ["windows", "macos", "linux"],
+        "description": "Fixed target OS for fingerprint generation."
+      },
+      "windowWidth": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Fixed outer window width."
+      },
+      "windowHeight": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Fixed outer window height."
+      },
+      "locale": {
+        "type": "string",
+        "description": "Fixed browser locale, e.g. zh-CN."
+      },
+      "headless": {
+        "type": "boolean",
+        "description": "Run Camoufox in headless mode."
+      },
+      "excludeUbo": {
+        "type": "boolean",
+        "description": "Exclude uBlock addon at launch (avoids regional addon fetch failures)."
+      },
+      "startupTimeoutMs": {
+        "type": "integer",
+        "minimum": 500,
+        "description": "Max wait time for daemon startup."
+      },
+      "launchTimeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "description": "Browser launch timeout in milliseconds."
+      },
+      "playwrightMcpBin": {
+        "type": "string",
+        "description": "Absolute path to playwright-mcp executable used by daemon bridge."
+      },
+      "playwrightMcpStartupTimeoutMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "description": "Startup timeout in milliseconds for playwright-mcp initialization."
+      },
+      "playwrightMcpOutputDir": {
+        "type": "string",
+        "description": "Directory for playwright-mcp generated files (screenshots, snapshots, PDFs)."
+      },
+      "defaultProxyServer": {
+        "type": "string",
+        "description": "Default proxy server passed to Camoufox, e.g. socks5://127.0.0.1:11080."
+      }
+    }
+  }
+}
