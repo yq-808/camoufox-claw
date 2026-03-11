@@ -22,8 +22,12 @@ OpenClaw plugin + daemon bridge for operating Camoufox with a single long-lived 
 
 ```bash
 cd ~/code/camoufox-claw
+cp .env.example .env
+# edit .env with your VM host/user/path
 ./deploy/deploy_to_vm.sh
 ```
+
+`deploy/deploy_to_vm.sh` now loads deploy defaults from `.env` in repo root. CLI flags still override `.env`.
 
 Deploy now also installs `@playwright/mcp` on the VM (`~/.camoufox-claw/playwright-mcp`) and runs a closed-loop verify:
 1) launch Camoufox Playwright ws endpoint

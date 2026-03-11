@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOST="root@47.112.6.140"
-SSH_KEY="${HOME}/.ssh/id_ed25519"
-REMOTE_DIR="/home/admin/code/camoufox-claw"
-ADMIN_USER="admin"
-GATEWAY_SERVICE="openclaw-gateway.service"
-PROXY_SERVER=""
-SKIP_RESTART="0"
-FETCH_CAMOUFOX="0"
-OFFLINE_CAMOUFOX="0"
-CAMOUFOX_ASSET_URL=""
-PLAYWRIGHT_MCP_VERSION="0.0.56"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${DEPLOY_ENV_FILE:-$ROOT_DIR/.env}"
+
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+
+HOST="${DEPLOY_HOST:-}"
+SSH_KEY="${DEPLOY_SSH_KEY:-${HOME}/.ssh/id_ed25519}"
+REMOTE_DIR="${DEPLOY_REMOTE_DIR:-/home/admin/code/camoufox-claw}"
+ADMIN_USER="${DEPLOY_ADMIN_USER:-admin}"
+GATEWAY_SERVICE="${DEPLOY_GATEWAY_SERVICE:-openclaw-gateway.service}"
+PROXY_SERVER="${DEPLOY_PROXY_SERVER:-}"
+SKIP_RESTART="${DEPLOY_SKIP_RESTART:-0}"
+FETCH_CAMOUFOX="${DEPLOY_FETCH_CAMOUFOX:-0}"
+OFFLINE_CAMOUFOX="${DEPLOY_OFFLINE_CAMOUFOX:-0}"
+CAMOUFOX_ASSET_URL="${DEPLOY_CAMOUFOX_ASSET_URL:-}"
+PLAYWRIGHT_MCP_VERSION="${DEPLOY_PLAYWRIGHT_MCP_VERSION:-0.0.56}"
 LOCAL_OFFLINE_CACHE_TAR=""
 LOCAL_OFFLINE_TMP_DIR=""
 LOCAL_OFFLINE_ZIP=""
@@ -31,17 +42,19 @@ usage() {
   cat <<'EOF'
 Usage: deploy_to_vm.sh [options]
 
+Defaults are loaded from .env in repo root (or DEPLOY_ENV_FILE). CLI options override .env.
+
 Options:
-  --host <user@host>              SSH target (default: root@47.112.6.140)
-  --ssh-key <path>                SSH private key (default: ~/.ssh/id_ed25519)
-  --remote-dir <path>             Remote project path (default: /home/admin/code/camoufox-claw)
-  --admin-user <user>             User running OpenClaw on VM (default: admin)
-  --gateway-service <service>     User systemd service name (default: openclaw-gateway.service)
+  --host <user@host>              SSH target (required: DEPLOY_HOST or --host)
+  --ssh-key <path>                SSH private key (default: DEPLOY_SSH_KEY or ~/.ssh/id_ed25519)
+  --remote-dir <path>             Remote project path (default: DEPLOY_REMOTE_DIR or /home/admin/code/camoufox-claw)
+  --admin-user <user>             User running OpenClaw on VM (default: DEPLOY_ADMIN_USER or admin)
+  --gateway-service <service>     User systemd service name (default: DEPLOY_GATEWAY_SERVICE or openclaw-gateway.service)
   --proxy-server <url>            Default proxy for Camoufox (e.g. socks5://127.0.0.1:11080)
   --offline-camoufox              Download Camoufox package locally and upload cache to VM
   --camoufox-asset-url <url>      Optional asset URL override for --offline-camoufox
   --fetch-camoufox                Run `python -m camoufox fetch` during deploy (slow, large download)
-  --playwright-mcp-version <ver>  @playwright/mcp version to install (default: 0.0.56)
+  --playwright-mcp-version <ver>  @playwright/mcp version to install (default: DEPLOY_PLAYWRIGHT_MCP_VERSION or 0.0.56)
   --skip-restart                  Do not restart OpenClaw gateway service
   -h, --help                      Show this help
 EOF
@@ -105,6 +118,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ -z "$HOST" ]]; then
+  echo "Host is required. Set DEPLOY_HOST in .env or pass --host <user@host>." >&2
+  exit 1
+fi
+
 if [[ ! -f "$SSH_KEY" ]]; then
   echo "SSH key not found: $SSH_KEY" >&2
   exit 1
@@ -115,7 +133,6 @@ if [[ "$OFFLINE_CAMOUFOX" == "1" && "$FETCH_CAMOUFOX" == "1" ]]; then
   exit 1
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_TAR="$(mktemp /tmp/camoufox-claw.XXXXXX.tgz)"
 REMOTE_TAR="/tmp/camoufox-claw.$RANDOM.$RANDOM.tgz"
 
