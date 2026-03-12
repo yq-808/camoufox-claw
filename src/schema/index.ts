@@ -1,7 +1,5 @@
 import type { BrowserAction } from "../constants/actions";
-import { BROWSER_SCHEMAS_A } from "./browserSchemasA";
-import { BROWSER_SCHEMAS_B } from "./browserSchemasB";
-import { BROWSER_SCHEMAS_C } from "./browserSchemasC";
+import { BROWSER_ACTION_INPUT_SCHEMAS } from "./browserSchemas";
 
 const STRICT_EMPTY_OBJECT_SCHEMA = {
   type: "object",
@@ -23,12 +21,6 @@ export const COMMON_OVERRIDE_PROPERTIES = {
     description: "Optional headless override",
   },
 } as const;
-
-const BROWSER_ACTION_INPUT_SCHEMAS: Partial<Record<BrowserAction, Record<string, unknown>>> = {
-  ...BROWSER_SCHEMAS_A,
-  ...BROWSER_SCHEMAS_B,
-  ...BROWSER_SCHEMAS_C,
-};
 
 function cloneSchema<T>(schema: T): T {
   return JSON.parse(JSON.stringify(schema)) as T;
