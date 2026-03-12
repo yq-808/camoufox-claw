@@ -379,6 +379,7 @@ class PlaywrightMcpBridge:
         self.window_size = window_size
         self.locale = locale
         self.startup_timeout_ms = max(1000, startup_timeout_ms)
+        self.bridge_runner_path = Path(__file__).with_name("browser_bridge_runner.cjs")
 
         self.endpoint_proc: Optional[subprocess.Popen[str]] = None
         self.endpoint_script_copy: Optional[Path] = None
@@ -386,7 +387,6 @@ class PlaywrightMcpBridge:
 
         self.mcp_proc: Optional[subprocess.Popen[str]] = None
         self.mcp_selector: Optional[selectors.BaseSelector] = None
-        self.mcp_config_path: Optional[Path] = None
         self.mcp_stderr_lines: list[str] = []
         self.mcp_bound_endpoint: Optional[str] = None
         self.mcp_ready = False
@@ -395,10 +395,12 @@ class PlaywrightMcpBridge:
     def status(self) -> Dict[str, Any]:
         return {
             "playwrightMcpBin": str(self.playwright_mcp_bin),
+            "bridgeRunner": str(self.bridge_runner_path),
             "outputDir": str(self.output_dir),
             "identityPath": str(self.identity_path),
             "identityExists": self.identity_path.exists(),
             "userDataDir": str(self.user_data_dir),
+            "bridgeRunning": bool(self.mcp_proc and self.mcp_proc.poll() is None),
             "endpointRunning": bool(self.endpoint_proc and self.endpoint_proc.poll() is None),
             "mcpRunning": bool(self.mcp_proc and self.mcp_proc.poll() is None),
             "mcpReady": bool(self.mcp_ready),
@@ -414,7 +416,7 @@ class PlaywrightMcpBridge:
         result = response.get("result")
         if isinstance(result, dict):
             return result
-        raise RuntimeError("playwright-mcp returned invalid tools/list result")
+        raise RuntimeError("browser bridge returned invalid tools/list result")
 
     def call_tool(self, *, tool_name: str, arguments: Dict[str, Any], timeout_ms: int) -> Any:
         if tool_name == "browser_take_screenshot":
@@ -441,13 +443,6 @@ class PlaywrightMcpBridge:
             except Exception:
                 pass
             self.mcp_selector = None
-
-        if self.mcp_config_path is not None:
-            try:
-                self.mcp_config_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            self.mcp_config_path = None
 
         self.mcp_bound_endpoint = None
         self.mcp_ready = False
@@ -533,6 +528,7 @@ class PlaywrightMcpBridge:
             options = strip_none(launch_options(**launch_kwargs))
             payload_options = strip_proxy_options(to_camel_case_dict(options))
             payload_options["_userDataDir"] = str(self.user_data_dir)
+            payload_options["_sharedBrowser"] = True
             self.identity_path.write_text(
                 json.dumps(payload_options, ensure_ascii=False, indent=2),
                 encoding="utf-8",
@@ -544,6 +540,7 @@ class PlaywrightMcpBridge:
         else:
             payload_options = strip_proxy_options(payload_options)
             payload_options["_userDataDir"] = str(self.user_data_dir)
+            payload_options["_sharedBrowser"] = True
 
         payload_runtime_options = dict(payload_options)
         if self.proxy_server:
@@ -622,29 +619,38 @@ class PlaywrightMcpBridge:
         self._stop_mcp()
         if not self.playwright_mcp_bin.exists():
             raise RuntimeError(f"playwright-mcp binary not found: {self.playwright_mcp_bin}")
+        if not self.bridge_runner_path.exists():
+            raise RuntimeError(f"bridge runner not found: {self.bridge_runner_path}")
 
-        fd, config_path = tempfile.mkstemp(prefix="camoufox-playwright-mcp-", suffix=".json")
-        os.close(fd)
-        config_file = Path(config_path)
-        config_file.write_text(
-            json.dumps(
-                {
-                    "browser": {"remoteEndpoint": endpoint},
-                    "outputDir": str(self.output_dir),
-                },
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-        self.mcp_config_path = config_file
+        try:
+            from camoufox.server import get_nodejs  # type: ignore
+        except Exception as err:  # noqa: BLE001
+            raise RuntimeError(f"failed to import camoufox.server.get_nodejs: {err}") from err
+
+        mcp_bin_path = self.playwright_mcp_bin.expanduser()
+        modules_dir = mcp_bin_path.parent.parent
+        if not modules_dir.exists():
+            mcp_bin_resolved = mcp_bin_path.resolve()
+            modules_dir = mcp_bin_resolved.parent.parent
+        if not modules_dir.exists():
+            raise RuntimeError(f"playwright modules directory not found: {modules_dir}")
+
+        env = os.environ.copy()
+        env["CAMOUFOX_BRIDGE_WS_ENDPOINT"] = endpoint
+        env["CAMOUFOX_BRIDGE_OUTPUT_DIR"] = str(self.output_dir)
+        env["CAMOUFOX_BRIDGE_MODULES_DIR"] = str(modules_dir)
+        env["CAMOUFOX_BRIDGE_BROWSER"] = "firefox"
+        env["CAMOUFOX_BRIDGE_CLOSE_MODE"] = "real"
 
         self.mcp_proc = subprocess.Popen(
-            [str(self.playwright_mcp_bin), "--config", str(config_file), "--headless"],
+            [get_nodejs(), str(self.bridge_runner_path)],
+            cwd=str(self.bridge_runner_path.parent),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,
+            env=env,
         )
         self.mcp_selector = selectors.DefaultSelector()
         assert self.mcp_proc.stdout is not None
@@ -673,7 +679,7 @@ class PlaywrightMcpBridge:
             init_id, timeout_seconds=max(5.0, self.startup_timeout_ms / 1000.0)
         )
         if init_resp.get("error"):
-            raise RuntimeError(f"playwright-mcp initialize failed: {init_resp['error']}")
+            raise RuntimeError(f"browser bridge initialize failed: {init_resp['error']}")
         self._send_mcp({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
         self.mcp_ready = True
 
@@ -684,7 +690,7 @@ class PlaywrightMcpBridge:
 
     def _send_mcp(self, payload: Dict[str, Any]) -> None:
         if self.mcp_proc is None or self.mcp_proc.stdin is None:
-            raise RuntimeError("playwright-mcp process is not running")
+            raise RuntimeError("browser bridge process is not running")
         self.mcp_proc.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
         self.mcp_proc.stdin.flush()
 
@@ -695,12 +701,12 @@ class PlaywrightMcpBridge:
 
     def _read_mcp_message(self, timeout_seconds: float) -> Dict[str, Any]:
         if self.mcp_proc is None or self.mcp_selector is None:
-            raise RuntimeError("playwright-mcp process is not running")
+            raise RuntimeError("browser bridge process is not running")
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             if self.mcp_proc.poll() is not None:
                 raise RuntimeError(
-                    f"playwright-mcp exited with code {self.mcp_proc.returncode}; stderr={self._stderr_excerpt()}"
+                    f"browser bridge exited with code {self.mcp_proc.returncode}; stderr={self._stderr_excerpt()}"
                 )
             events = self.mcp_selector.select(timeout=0.5)
             for key, _ in events:
@@ -725,7 +731,7 @@ class PlaywrightMcpBridge:
                     continue
                 if isinstance(payload, dict):
                     return payload
-        raise TimeoutError(f"timed out waiting for playwright-mcp response; stderr={self._stderr_excerpt()}")
+        raise TimeoutError(f"timed out waiting for browser bridge response; stderr={self._stderr_excerpt()}")
 
     def _wait_for_response(self, request_id: int, timeout_seconds: float) -> Dict[str, Any]:
         deadline = time.time() + timeout_seconds
@@ -737,7 +743,7 @@ class PlaywrightMcpBridge:
                 continue
             if message.get("id") == request_id:
                 return message
-        raise TimeoutError(f"timed out waiting for playwright-mcp response id={request_id}")
+        raise TimeoutError(f"timed out waiting for browser bridge response id={request_id}")
 
     def _request(self, method: str, params: Dict[str, Any], timeout_ms: int) -> Dict[str, Any]:
         self._ensure_mcp_ready()
@@ -755,7 +761,7 @@ class PlaywrightMcpBridge:
             timeout_seconds=max(2.0, float(timeout_ms) / 1000.0),
         )
         if response.get("error"):
-            raise RuntimeError(f"playwright-mcp {method} failed: {response['error']}")
+            raise RuntimeError(f"browser bridge {method} failed: {response['error']}")
         return response
 
 
