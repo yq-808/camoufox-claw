@@ -88,38 +88,28 @@ const DAEMON_ACTIONS = {
 const BROWSER_ACTIONS = [
   "browser_click",
   "browser_close",
-  "browser_console_messages",
   "browser_drag",
-  "browser_evaluate",
   "browser_file_upload",
   "browser_fill_form",
   "browser_handle_dialog",
   "browser_hover",
   "browser_navigate",
   "browser_navigate_back",
-  "browser_network_requests",
   "browser_press_key",
   "browser_resize",
-  "browser_run_code",
   "browser_select_option",
   "browser_snapshot",
   "browser_take_screenshot",
   "browser_type",
   "browser_wait_for",
   "browser_tabs",
-  "browser_install",
   "browser_mouse_click_xy",
   "browser_mouse_down",
   "browser_mouse_drag_xy",
   "browser_mouse_move_xy",
   "browser_mouse_up",
   "browser_mouse_wheel",
-  "browser_pdf_save",
   "browser_generate_locator",
-  "browser_verify_element_visible",
-  "browser_verify_list_visible",
-  "browser_verify_text_visible",
-  "browser_verify_value",
 ] as const;
 
 const STRICT_EMPTY_OBJECT_SCHEMA = {
@@ -169,19 +159,6 @@ const BROWSER_ACTION_INPUT_SCHEMAS: Partial<
     properties: {},
     additionalProperties: false,
   },
-  browser_console_messages: {
-    type: "object",
-    properties: {
-      level: {
-        type: "string",
-        enum: ["error", "warning", "info", "debug"],
-        default: "info",
-        description:
-          'Level of the console messages to return. Each level includes the messages of more severe levels. Defaults to "info".',
-      },
-    },
-    additionalProperties: false,
-  },
   browser_drag: {
     type: "object",
     properties: {
@@ -205,27 +182,6 @@ const BROWSER_ACTION_INPUT_SCHEMAS: Partial<
       },
     },
     required: ["startElement", "startRef", "endElement", "endRef"],
-    additionalProperties: false,
-  },
-  browser_evaluate: {
-    type: "object",
-    properties: {
-      function: {
-        type: "string",
-        description:
-          "() => { /* code */ } or (element) => { /* code */ } when element is provided",
-      },
-      element: {
-        type: "string",
-        description:
-          "Human-readable element description used to obtain permission to interact with the element",
-      },
-      ref: {
-        type: "string",
-        description: "Exact target element reference from the page snapshot",
-      },
-    },
-    required: ["function"],
     additionalProperties: false,
   },
   browser_file_upload: {
@@ -323,11 +279,6 @@ const BROWSER_ACTION_INPUT_SCHEMAS: Partial<
     required: ["element", "ref"],
     additionalProperties: false,
   },
-  browser_install: {
-    type: "object",
-    properties: {},
-    additionalProperties: false,
-  },
   browser_mouse_click_xy: {
     type: "object",
     properties: {
@@ -412,29 +363,6 @@ const BROWSER_ACTION_INPUT_SCHEMAS: Partial<
     properties: {},
     additionalProperties: false,
   },
-  browser_network_requests: {
-    type: "object",
-    properties: {
-      includeStatic: {
-        type: "boolean",
-        default: false,
-        description:
-          "Whether to include successful static resources like images, fonts, scripts, etc. Defaults to false.",
-      },
-    },
-    additionalProperties: false,
-  },
-  browser_pdf_save: {
-    type: "object",
-    properties: {
-      filename: {
-        type: "string",
-        description:
-          "File name to save the pdf to. Defaults to `page-{timestamp}.pdf` if not specified. Prefer relative file names to stay within the output directory.",
-      },
-    },
-    additionalProperties: false,
-  },
   browser_press_key: {
     type: "object",
     properties: {
@@ -460,18 +388,6 @@ const BROWSER_ACTION_INPUT_SCHEMAS: Partial<
       },
     },
     required: ["width", "height"],
-    additionalProperties: false,
-  },
-  browser_run_code: {
-    type: "object",
-    properties: {
-      code: {
-        type: "string",
-        description:
-          "A JavaScript function containing Playwright code to execute. It will be invoked with a single argument, page, which you can use for any page interaction. For example: `async (page) => { await page.getByRole('button', { name: 'Submit' }).click(); return await page.title(); }`",
-      },
-    },
-    required: ["code"],
     additionalProperties: false,
   },
   browser_select_option: {
@@ -581,79 +497,6 @@ const BROWSER_ACTION_INPUT_SCHEMAS: Partial<
       },
     },
     required: ["element", "ref", "text"],
-    additionalProperties: false,
-  },
-  browser_verify_element_visible: {
-    type: "object",
-    properties: {
-      role: {
-        type: "string",
-        description:
-          'ROLE of the element. Can be found in the snapshot like this: `- {ROLE} "Accessible Name":`',
-      },
-      accessibleName: {
-        type: "string",
-        description:
-          'ACCESSIBLE_NAME of the element. Can be found in the snapshot like this: `- role "{ACCESSIBLE_NAME}"`',
-      },
-    },
-    required: ["role", "accessibleName"],
-    additionalProperties: false,
-  },
-  browser_verify_list_visible: {
-    type: "object",
-    properties: {
-      element: {
-        type: "string",
-        description: "Human-readable list description",
-      },
-      ref: {
-        type: "string",
-        description: "Exact target element reference that points to the list",
-      },
-      items: {
-        type: "array",
-        items: { type: "string" },
-        description: "Items to verify",
-      },
-    },
-    required: ["element", "ref", "items"],
-    additionalProperties: false,
-  },
-  browser_verify_text_visible: {
-    type: "object",
-    properties: {
-      text: {
-        type: "string",
-        description:
-          'TEXT to verify. Can be found in the snapshot like this: `- role "Accessible Name": {TEXT}` or like this: `- text: {TEXT}`',
-      },
-    },
-    required: ["text"],
-    additionalProperties: false,
-  },
-  browser_verify_value: {
-    type: "object",
-    properties: {
-      type: {
-        type: "string",
-        enum: ["textbox", "checkbox", "radio", "combobox", "slider"],
-        description: "Type of the element",
-      },
-      element: {
-        type: "string",
-        description: "Human-readable element description",
-      },
-      ref: {
-        type: "string",
-        description: "Exact target element reference that points to the element",
-      },
-      value: {
-        type: "string",
-        description: 'Value to verify. For checkbox, use "true" or "false".',
-      },
-    },
-    required: ["type", "element", "ref", "value"],
     additionalProperties: false,
   },
   browser_wait_for: {
