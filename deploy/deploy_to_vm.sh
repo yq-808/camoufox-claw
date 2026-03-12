@@ -137,9 +137,11 @@ TMP_TAR="$(mktemp /tmp/camoufox-claw.XXXXXX.tgz)"
 REMOTE_TAR="/tmp/camoufox-claw.$RANDOM.$RANDOM.tgz"
 
 echo "Packing project from $ROOT_DIR"
+export COPYFILE_DISABLE=1
 tar \
   --exclude=".git" \
   --exclude=".venv" \
+  --exclude="._*" \
   --exclude="__pycache__" \
   --exclude="*.pyc" \
   -czf "$TMP_TAR" \
@@ -319,7 +321,10 @@ if ! sudo -u "$ADMIN_USER" -H bash -lc 'command -v openclaw >/dev/null 2>&1'; th
 fi
 
 mkdir -p "$REMOTE_DIR"
+# Keep virtualenv cache, remove everything else to avoid stale files from older deploys.
+find "$REMOTE_DIR" -mindepth 1 -maxdepth 1 ! -name '.venv' -exec rm -rf {} +
 tar -xzf "$REMOTE_TAR" -C "$REMOTE_DIR"
+find "$REMOTE_DIR" -type f -name '._*' -delete
 chown -R "$ADMIN_USER:$ADMIN_USER" "$REMOTE_DIR"
 if [[ -n "$OFFLINE_CACHE_TAR" && -f "$OFFLINE_CACHE_TAR" ]]; then
   chmod 0644 "$OFFLINE_CACHE_TAR"
@@ -344,6 +349,56 @@ if [[ -z "$OPENCLAW_BIN" ]]; then
   echo "openclaw binary not found for user $USER" >&2
   exit 1
 fi
+
+# Pre-clean stale plugin keys directly in JSON so openclaw CLI can pass schema validation.
+python3 - <<'PY'
+import json
+from pathlib import Path
+
+cfg_path = Path.home() / ".openclaw" / "openclaw.json"
+if not cfg_path.exists():
+    raise SystemExit(0)
+
+allowed = {
+    "pythonBin",
+    "daemonPath",
+    "host",
+    "port",
+    "runtimeDir",
+    "userDataDir",
+    "targetOs",
+    "windowWidth",
+    "windowHeight",
+    "locale",
+    "headless",
+    "excludeUbo",
+    "startupTimeoutMs",
+    "playwrightMcpBin",
+    "playwrightMcpStartupTimeoutMs",
+    "playwrightMcpOutputDir",
+    "defaultProxyServer",
+}
+
+data = json.loads(cfg_path.read_text(encoding="utf-8"))
+plugins = data.get("plugins")
+if not isinstance(plugins, dict):
+    raise SystemExit(0)
+entries = plugins.get("entries")
+if not isinstance(entries, dict):
+    raise SystemExit(0)
+entry = entries.get("camoufox-claw")
+if not isinstance(entry, dict):
+    raise SystemExit(0)
+config = entry.get("config")
+if not isinstance(config, dict):
+    raise SystemExit(0)
+
+cleaned = {k: v for k, v in config.items() if k in allowed}
+if cleaned == config:
+    raise SystemExit(0)
+entry["config"] = cleaned
+cfg_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
 
 if [[ ! -x "$HOME/.local/bin/uv" ]]; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -420,25 +475,39 @@ fi
 npm --prefix "$PLAYWRIGHT_MCP_HOME" install --omit=dev --no-fund --no-audit \
   "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION:-latest}"
 PLAYWRIGHT_MCP_BIN="$PLAYWRIGHT_MCP_HOME/node_modules/.bin/playwright-mcp"
-if [[ ! -x "$PLAYWRIGHT_MCP_BIN" && -x "$PLAYWRIGHT_MCP_HOME/node_modules/.bin/mcp-server-playwright" ]]; then
-  ln -sf mcp-server-playwright "$PLAYWRIGHT_MCP_HOME/node_modules/.bin/playwright-mcp"
-fi
 if [[ ! -x "$PLAYWRIGHT_MCP_BIN" ]]; then
   echo "playwright-mcp binary not found after install: $PLAYWRIGHT_MCP_BIN" >&2
   exit 1
 fi
 
-VERIFY_ARGS=(--playwright-mcp-bin "$PLAYWRIGHT_MCP_BIN")
+INPROC_VERIFY_ARGS=(
+  --pythonBin "$REMOTE_DIR/.venv/bin/python"
+  --daemonPath "$REMOTE_DIR/scripts/camoufox_daemon.py"
+  --host 127.0.0.1
+  --port 17888
+  --runtimeDir "$HOME/.camoufox-claw/runtime"
+  --userDataDir "$HOME/.camoufox-claw/profile"
+  --targetOs macos
+  --windowWidth 1280
+  --windowHeight 800
+  --locale zh-CN
+  --playwrightMcpBin "$PLAYWRIGHT_MCP_BIN"
+  --playwrightMcpStartupTimeoutMs 30000
+  --playwrightMcpOutputDir "$HOME/.openclaw/media/camoufox-mcp"
+  --headless true
+  --excludeUbo true
+  --startupTimeoutMs 20000
+  --testUrl https://example.com
+)
 if [[ -n "${PROXY_SERVER:-}" ]]; then
-  VERIFY_ARGS+=(--proxy-server "$PROXY_SERVER")
+  INPROC_VERIFY_ARGS+=(--proxyServer "$PROXY_SERVER")
 fi
-.venv/bin/python scripts/verify_playwright_mcp.py "${VERIFY_ARGS[@]}"
+node scripts/verify_inprocess_bridge.cjs "${INPROC_VERIFY_ARGS[@]}"
 
 "$OPENCLAW_BIN" plugins install -l "$REMOTE_DIR"
 "$OPENCLAW_BIN" plugins enable camoufox-claw
 
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.pythonBin "$REMOTE_DIR/.venv/bin/python"
-"$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.ctlPath "$REMOTE_DIR/scripts/camoufoxctl.py"
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.daemonPath "$REMOTE_DIR/scripts/camoufox_daemon.py"
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.host 127.0.0.1
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.port 17888
@@ -451,7 +520,6 @@ fi
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.headless true
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.excludeUbo true
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.startupTimeoutMs 20000
-"$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.launchTimeoutMs 30000
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.playwrightMcpBin "$PLAYWRIGHT_MCP_BIN"
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.playwrightMcpStartupTimeoutMs 30000
 "$OPENCLAW_BIN" config set plugins.entries.camoufox-claw.config.playwrightMcpOutputDir "$HOME/.openclaw/media/camoufox-mcp"

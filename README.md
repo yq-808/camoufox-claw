@@ -4,19 +4,27 @@ OpenClaw plugin + daemon bridge for operating Camoufox with a single long-lived 
 
 ## What it does
 
-- Adds a `camoufox` OpenClaw tool.
+- Adds Camoufox lifecycle + browser tools to OpenClaw.
 - Auto-starts a local Camoufox daemon on first call.
 - Keeps one daemon/browser process and reuses it across calls.
-- Exposes actions like `status`, `ensure`, `navigate`, `snapshot`, `screenshot`, `stop`, `restart`, `shutdown`.
+- Lifecycle actions are daemon-backed: `status`, `ensure`, `stop`, `restart`, `shutdown`.
+- Browser actions are Playwright MCP-backed (for example: `navigate`, `snapshot`, `take_screenshot`, `click`, `type`).
+
+## Runtime Flow
+
+1) OpenClaw calls plugin tool in `index.ts`.
+2) Plugin daemon supervisor (Node, in `src/daemon`) auto-starts/reuses `scripts/camoufox_daemon.py` via loopback TCP.
+3) Plugin requests `endpoint_ensure` from daemon and gets Camoufox Playwright ws endpoint.
+4) Plugin executes browser tools with in-process Playwright MCP (`createConnection`) via in-memory transport.
 
 ## Layout
 
-- `index.ts`: OpenClaw plugin tool definition.
+- `index.ts`: OpenClaw plugin entrypoint.
+- `src/`: plugin modules (config, daemon supervisor, in-process MCP bridge, schemas, tool wiring).
 - `openclaw.plugin.json`: plugin manifest + config schema.
 - `scripts/camoufox_daemon.py`: long-lived Camoufox process.
-- `scripts/camoufoxctl.py`: command client and auto-start manager.
 - `deploy/deploy_to_vm.sh`: SSH deploy + remote OpenClaw config script.
-- `scripts/verify_playwright_mcp.py`: deploy-time end-to-end check for Camoufox endpoint + Playwright MCP.
+- `scripts/verify_inprocess_bridge.cjs`: deploy-time verification for plugin runtime path (daemon `endpoint_ensure` + in-process MCP call path).
 
 ## Deploy
 
@@ -30,9 +38,10 @@ cp .env.example .env
 `deploy/deploy_to_vm.sh` now loads deploy defaults from `.env` in repo root. CLI flags still override `.env`.
 
 Deploy now also installs `@playwright/mcp` on the VM (`~/.camoufox-claw/playwright-mcp`) and runs a closed-loop verify:
-1) launch Camoufox Playwright ws endpoint
-2) start playwright-mcp with `remoteEndpoint`
-3) run MCP `initialize` / `tools/list` / `tools/call(browser_navigate)`
+1) ensure daemon is alive
+2) ensure endpoint is available (`endpoint_ensure`)
+3) run in-process MCP `tools/list`
+4) run in-process MCP `browser_navigate`
 
 Optional proxy:
 
