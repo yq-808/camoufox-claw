@@ -8,6 +8,7 @@ import fcntl
 import json
 import os
 import queue
+import random
 import re
 import selectors
 import signal
@@ -17,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+from math import asin, atan2, cos, degrees, radians, sin, tau
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -49,6 +51,13 @@ MCP_TOOL_ACTIONS = {
 
 SCREENSHOT_RETENTION_SECONDS = 3600
 SCREENSHOT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+DEFAULT_TIMEZONE = "Asia/Shanghai"
+DEFAULT_GEO_ACCURACY = 35
+SHENZHEN_BASE_LAT = 22.5431
+SHENZHEN_BASE_LON = 114.0579
+SHENZHEN_DISTANCE_KM_MIN = 4.0
+SHENZHEN_DISTANCE_KM_MAX = 6.0
+EARTH_RADIUS_KM = 6371.0088
 
 
 def terminate_process(proc: Optional[subprocess.Popen[Any]], timeout: float = 8.0) -> None:
@@ -116,6 +125,27 @@ def cleanup_old_screenshots(root_dir: Path, *, retention_seconds: int) -> int:
             continue
 
     return deleted_count
+
+
+def random_geolocation_near_shenzhen() -> tuple[float, float]:
+    # Random point around Shenzhen center, distance constrained near 5km.
+    distance_km = random.uniform(SHENZHEN_DISTANCE_KM_MIN, SHENZHEN_DISTANCE_KM_MAX)
+    bearing = random.uniform(0.0, tau)
+
+    lat1 = radians(SHENZHEN_BASE_LAT)
+    lon1 = radians(SHENZHEN_BASE_LON)
+    angular_distance = distance_km / EARTH_RADIUS_KM
+
+    lat2 = asin(
+        sin(lat1) * cos(angular_distance)
+        + cos(lat1) * sin(angular_distance) * cos(bearing)
+    )
+    lon2 = lon1 + atan2(
+        sin(bearing) * sin(angular_distance) * cos(lat1),
+        cos(angular_distance) - sin(lat1) * sin(lat2),
+    )
+
+    return round(degrees(lat2), 6), round(degrees(lon2), 6)
 
 
 class CamoufoxSession:
@@ -315,6 +345,7 @@ class PlaywrightMcpBridge:
         *,
         playwright_mcp_bin: Path,
         output_dir: Path,
+        identity_path: Path,
         user_data_dir: Path,
         headless: bool,
         proxy_server: Optional[str],
@@ -326,6 +357,7 @@ class PlaywrightMcpBridge:
     ) -> None:
         self.playwright_mcp_bin = playwright_mcp_bin
         self.output_dir = output_dir
+        self.identity_path = identity_path
         self.user_data_dir = user_data_dir
         self.headless = headless
         self.proxy_server = proxy_server
@@ -351,6 +383,8 @@ class PlaywrightMcpBridge:
         return {
             "playwrightMcpBin": str(self.playwright_mcp_bin),
             "outputDir": str(self.output_dir),
+            "identityPath": str(self.identity_path),
+            "identityExists": self.identity_path.exists(),
             "userDataDir": str(self.user_data_dir),
             "endpointRunning": bool(self.endpoint_proc and self.endpoint_proc.poll() is None),
             "mcpRunning": bool(self.mcp_proc and self.mcp_proc.poll() is None),
@@ -445,9 +479,50 @@ class PlaywrightMcpBridge:
             launch_kwargs["exclude_addons"] = [DefaultAddons.UBO]
 
         self.user_data_dir.mkdir(parents=True, exist_ok=True)
-        options = strip_none(launch_options(**launch_kwargs))
-        payload_options = to_camel_case_dict(options)
-        payload_options["_userDataDir"] = str(self.user_data_dir)
+        self.identity_path.parent.mkdir(parents=True, exist_ok=True)
+
+        payload_options: Dict[str, Any]
+        if self.identity_path.exists():
+            try:
+                loaded = json.loads(self.identity_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and loaded:
+                    payload_options = strip_none(loaded)
+                else:
+                    raise ValueError("identity.json must be a non-empty JSON object")
+            except Exception as err:  # noqa: BLE001
+                print(
+                    f"failed to load identity snapshot {self.identity_path}: {err}; regenerating",
+                    file=sys.stderr,
+                )
+                payload_options = {}
+        else:
+            payload_options = {}
+
+        if not payload_options:
+            lat, lon = random_geolocation_near_shenzhen()  # nosec: intended non-crypto randomization
+            launch_kwargs["config"] = {
+                "timezone": DEFAULT_TIMEZONE,
+                "geolocation:latitude": lat,
+                "geolocation:longitude": lon,
+                "geolocation:accuracy": DEFAULT_GEO_ACCURACY,
+                "locale:language": "zh",
+                "locale:region": "CN",
+            }
+            launch_kwargs["i_know_what_im_doing"] = True
+            options = strip_none(launch_options(**launch_kwargs))
+            payload_options = to_camel_case_dict(options)
+            payload_options["_userDataDir"] = str(self.user_data_dir)
+            self.identity_path.write_text(
+                json.dumps(payload_options, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(
+                f"created identity snapshot {self.identity_path} with lat={lat}, lon={lon}",
+                file=sys.stderr,
+            )
+        else:
+            payload_options["_userDataDir"] = str(self.user_data_dir)
+
         payload = base64.b64encode(orjson.dumps(payload_options)).decode("ascii")
 
         launch_script = LOCAL_DATA / "launchServer.js"
@@ -840,6 +915,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     runtime_dir = Path(args.runtime_dir).expanduser()
+    identity_path = runtime_dir / "identity.json"
     user_data_dir = Path(args.user_data_dir).expanduser()
     playwright_mcp_bin = Path(str(args.playwright_mcp_bin)).expanduser()
     playwright_mcp_output_dir = Path(str(args.playwright_mcp_output_dir)).expanduser()
@@ -879,6 +955,7 @@ def main() -> int:
     mcp_bridge = PlaywrightMcpBridge(
         playwright_mcp_bin=playwright_mcp_bin,
         output_dir=playwright_mcp_output_dir,
+        identity_path=identity_path,
         user_data_dir=user_data_dir,
         headless=bool(args.headless),
         proxy_server=(str(args.proxy_server).strip() or None),
