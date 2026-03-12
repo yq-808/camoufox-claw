@@ -53,6 +53,7 @@ SCREENSHOT_RETENTION_SECONDS = 3600
 SCREENSHOT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 DEFAULT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_GEO_ACCURACY = 35
+PROXY_OPTION_KEYS = {"proxy", "proxyServer"}
 SHENZHEN_BASE_LAT = 22.5431
 SHENZHEN_BASE_LON = 114.0579
 SHENZHEN_DISTANCE_KM_MIN = 4.0
@@ -76,6 +77,18 @@ def strip_none(value: Any) -> Any:
         return {k: strip_none(v) for k, v in value.items() if v is not None}
     if isinstance(value, list):
         return [strip_none(v) for v in value if v is not None]
+    return value
+
+
+def strip_proxy_options(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: strip_proxy_options(item)
+            for key, item in value.items()
+            if key not in PROXY_OPTION_KEYS
+        }
+    if isinstance(value, list):
+        return [strip_proxy_options(item) for item in value]
     return value
 
 
@@ -473,8 +486,6 @@ class PlaywrightMcpBridge:
             "window": self.window_size,
             "locale": self.locale,
         }
-        if self.proxy_server:
-            launch_kwargs["proxy"] = {"server": self.proxy_server}
         if self.exclude_ubo:
             launch_kwargs["exclude_addons"] = [DefaultAddons.UBO]
 
@@ -486,7 +497,17 @@ class PlaywrightMcpBridge:
             try:
                 loaded = json.loads(self.identity_path.read_text(encoding="utf-8"))
                 if isinstance(loaded, dict) and loaded:
-                    payload_options = strip_none(loaded)
+                    loaded_without_none = strip_none(loaded)
+                    payload_options = strip_proxy_options(loaded_without_none)
+                    if payload_options != loaded_without_none:
+                        self.identity_path.write_text(
+                            json.dumps(payload_options, ensure_ascii=False, indent=2),
+                            encoding="utf-8",
+                        )
+                        print(
+                            f"removed proxy settings from identity snapshot {self.identity_path}",
+                            file=sys.stderr,
+                        )
                 else:
                     raise ValueError("identity.json must be a non-empty JSON object")
             except Exception as err:  # noqa: BLE001
@@ -510,7 +531,7 @@ class PlaywrightMcpBridge:
             }
             launch_kwargs["i_know_what_im_doing"] = True
             options = strip_none(launch_options(**launch_kwargs))
-            payload_options = to_camel_case_dict(options)
+            payload_options = strip_proxy_options(to_camel_case_dict(options))
             payload_options["_userDataDir"] = str(self.user_data_dir)
             self.identity_path.write_text(
                 json.dumps(payload_options, ensure_ascii=False, indent=2),
@@ -521,9 +542,13 @@ class PlaywrightMcpBridge:
                 file=sys.stderr,
             )
         else:
+            payload_options = strip_proxy_options(payload_options)
             payload_options["_userDataDir"] = str(self.user_data_dir)
 
-        payload = base64.b64encode(orjson.dumps(payload_options)).decode("ascii")
+        payload_runtime_options = dict(payload_options)
+        if self.proxy_server:
+            payload_runtime_options["proxy"] = {"server": self.proxy_server}
+        payload = base64.b64encode(orjson.dumps(payload_runtime_options)).decode("ascii")
 
         launch_script = LOCAL_DATA / "launchServer.js"
         if not launch_script.exists():
