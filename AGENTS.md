@@ -23,6 +23,14 @@
 - Script runs closed-loop checks for the in-process plugin path (`scripts/verify_inprocess_bridge.cjs`).
 - Script links plugin into OpenClaw (`openclaw plugins install -l <remote-dir>`), writes plugin config, and restarts OpenClaw gateway service.
 
+## Deployment Network Strategy
+
+- Prefer public mirrors for dependency install on VM:
+  - `DEPLOY_PIP_INDEX_URL="https://mirrors.aliyun.com/pypi/simple/"`
+  - `DEPLOY_NPM_REGISTRY="https://registry.npmmirror.com/"`
+- For Camoufox runtime package bootstrap, prefer `--offline-camoufox` when VM outbound bandwidth is limited.
+- Use `--fetch-camoufox` only when VM-to-GitHub download is known to be stable and fast.
+
 ## Operational Expectations
 
 - Camoufox daemon is lazy-started on tool invocation.

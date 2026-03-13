@@ -23,6 +23,8 @@ FETCH_CAMOUFOX="${DEPLOY_FETCH_CAMOUFOX:-0}"
 OFFLINE_CAMOUFOX="${DEPLOY_OFFLINE_CAMOUFOX:-0}"
 CAMOUFOX_ASSET_URL="${DEPLOY_CAMOUFOX_ASSET_URL:-}"
 PLAYWRIGHT_MCP_VERSION="${DEPLOY_PLAYWRIGHT_MCP_VERSION:-0.0.56}"
+PIP_INDEX_URL="${DEPLOY_PIP_INDEX_URL:-}"
+NPM_REGISTRY="${DEPLOY_NPM_REGISTRY:-}"
 LOCAL_OFFLINE_CACHE_TAR=""
 LOCAL_OFFLINE_TMP_DIR=""
 LOCAL_OFFLINE_ZIP=""
@@ -55,6 +57,8 @@ Options:
   --camoufox-asset-url <url>      Optional asset URL override for --offline-camoufox
   --fetch-camoufox                Run `python -m camoufox fetch` during deploy (slow, large download)
   --playwright-mcp-version <ver>  @playwright/mcp version to install (default: DEPLOY_PLAYWRIGHT_MCP_VERSION or 0.0.56)
+  --pip-index-url <url>           Python package index URL for uv pip install (default: DEPLOY_PIP_INDEX_URL)
+  --npm-registry <url>            npm registry URL for @playwright/mcp install (default: DEPLOY_NPM_REGISTRY)
   --skip-restart                  Do not restart OpenClaw gateway service
   -h, --help                      Show this help
 EOF
@@ -98,6 +102,14 @@ while [[ $# -gt 0 ]]; do
       PLAYWRIGHT_MCP_VERSION="$2"
       shift 2
       ;;
+    --pip-index-url)
+      PIP_INDEX_URL="$2"
+      shift 2
+      ;;
+    --npm-registry)
+      NPM_REGISTRY="$2"
+      shift 2
+      ;;
     --skip-restart)
       SKIP_RESTART="1"
       shift 1
@@ -133,7 +145,7 @@ if [[ "$OFFLINE_CAMOUFOX" == "1" && "$FETCH_CAMOUFOX" == "1" ]]; then
   exit 1
 fi
 
-TMP_TAR="$(mktemp /tmp/camoufox-claw.XXXXXX.tgz)"
+TMP_TAR="$(mktemp -t camoufox-claw.XXXXXX)"
 REMOTE_TAR="/tmp/camoufox-claw.$RANDOM.$RANDOM.tgz"
 
 echo "Packing project from $ROOT_DIR"
@@ -266,6 +278,14 @@ OFFLINE_CACHE_ARG="$REMOTE_OFFLINE_CACHE_TAR"
 if [[ -z "$OFFLINE_CACHE_ARG" ]]; then
   OFFLINE_CACHE_ARG="__EMPTY__"
 fi
+PIP_INDEX_ARG="$PIP_INDEX_URL"
+if [[ -z "$PIP_INDEX_ARG" ]]; then
+  PIP_INDEX_ARG="__EMPTY__"
+fi
+NPM_REGISTRY_ARG="$NPM_REGISTRY"
+if [[ -z "$NPM_REGISTRY_ARG" ]]; then
+  NPM_REGISTRY_ARG="__EMPTY__"
+fi
 
 echo "Running remote deployment on $HOST"
 ssh "${SSH_OPTS[@]}" "$HOST" bash -s -- \
@@ -277,7 +297,9 @@ ssh "${SSH_OPTS[@]}" "$HOST" bash -s -- \
   "$SKIP_RESTART" \
   "$FETCH_CAMOUFOX" \
   "$OFFLINE_CACHE_ARG" \
-  "$PLAYWRIGHT_MCP_VERSION" <<'REMOTE_EOF'
+  "$PLAYWRIGHT_MCP_VERSION" \
+  "$PIP_INDEX_ARG" \
+  "$NPM_REGISTRY_ARG" <<'REMOTE_EOF'
 set -euo pipefail
 
 REMOTE_TAR="$1"
@@ -289,11 +311,19 @@ SKIP_RESTART="$6"
 FETCH_CAMOUFOX="$7"
 OFFLINE_CACHE_TAR="$8"
 PLAYWRIGHT_MCP_VERSION="$9"
+PIP_INDEX_URL="${10:-}"
+NPM_REGISTRY="${11:-}"
 if [[ "$PROXY_SERVER" == "__EMPTY__" ]]; then
   PROXY_SERVER=""
 fi
 if [[ "$OFFLINE_CACHE_TAR" == "__EMPTY__" ]]; then
   OFFLINE_CACHE_TAR=""
+fi
+if [[ "$PIP_INDEX_URL" == "__EMPTY__" ]]; then
+  PIP_INDEX_URL=""
+fi
+if [[ "$NPM_REGISTRY" == "__EMPTY__" ]]; then
+  NPM_REGISTRY=""
 fi
 
 cleanup_remote_artifacts() {
@@ -336,6 +366,8 @@ sudo -u "$ADMIN_USER" -H env \
   FETCH_CAMOUFOX="$FETCH_CAMOUFOX" \
   OFFLINE_CACHE_TAR="$OFFLINE_CACHE_TAR" \
   PLAYWRIGHT_MCP_VERSION="$PLAYWRIGHT_MCP_VERSION" \
+  PIP_INDEX_URL="$PIP_INDEX_URL" \
+  NPM_REGISTRY="$NPM_REGISTRY" \
   bash -s <<'ADMIN_EOF'
 set -euo pipefail
 
@@ -412,7 +444,11 @@ fi
 if [[ ! -x ".venv/bin/python" ]]; then
   "$UV_BIN" venv --python 3.11 .venv
 fi
-"$UV_BIN" pip install --python .venv/bin/python -r requirements.txt
+UV_PIP_ARGS=()
+if [[ -n "${PIP_INDEX_URL:-}" ]]; then
+  UV_PIP_ARGS+=(--index-url "$PIP_INDEX_URL")
+fi
+"$UV_BIN" pip install --python .venv/bin/python -r requirements.txt "${UV_PIP_ARGS[@]}"
 
 if [[ -n "${OFFLINE_CACHE_TAR:-}" ]]; then
   if [[ ! -f "$OFFLINE_CACHE_TAR" ]]; then
@@ -472,11 +508,39 @@ if [[ ! -f "$PLAYWRIGHT_MCP_HOME/package.json" ]]; then
 JSON
 fi
 
-npm --prefix "$PLAYWRIGHT_MCP_HOME" install --omit=dev --no-fund --no-audit \
-  "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION:-latest}"
-PLAYWRIGHT_MCP_BIN="$PLAYWRIGHT_MCP_HOME/node_modules/.bin/playwright-mcp"
+NPM_INSTALL_ARGS=(--prefix "$PLAYWRIGHT_MCP_HOME" install --omit=dev --no-fund --no-audit)
+if [[ -n "${NPM_REGISTRY:-}" ]]; then
+  NPM_INSTALL_ARGS+=(--registry "$NPM_REGISTRY")
+fi
+NPM_INSTALL_ARGS+=("@playwright/mcp@${PLAYWRIGHT_MCP_VERSION:-latest}")
+npm "${NPM_INSTALL_ARGS[@]}"
+
+PLAYWRIGHT_MCP_BIN=""
+for bin_name in playwright-mcp mcp-server-playwright; do
+  candidate="$PLAYWRIGHT_MCP_HOME/node_modules/.bin/$bin_name"
+  if [[ -x "$candidate" ]]; then
+    PLAYWRIGHT_MCP_BIN="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$PLAYWRIGHT_MCP_BIN" && -f "$PLAYWRIGHT_MCP_HOME/node_modules/@playwright/mcp/package.json" ]]; then
+  bin_name="$(node -e '
+const pkg = require(process.argv[1]);
+if (typeof pkg.bin === "string") {
+  console.log(pkg.bin);
+} else if (pkg.bin && typeof pkg.bin === "object") {
+  const keys = Object.keys(pkg.bin);
+  if (keys.length > 0) console.log(keys[0]);
+}
+' "$PLAYWRIGHT_MCP_HOME/node_modules/@playwright/mcp/package.json" || true)"
+  if [[ -n "$bin_name" && -x "$PLAYWRIGHT_MCP_HOME/node_modules/.bin/$bin_name" ]]; then
+    PLAYWRIGHT_MCP_BIN="$PLAYWRIGHT_MCP_HOME/node_modules/.bin/$bin_name"
+  fi
+fi
+
 if [[ ! -x "$PLAYWRIGHT_MCP_BIN" ]]; then
-  echo "playwright-mcp binary not found after install: $PLAYWRIGHT_MCP_BIN" >&2
+  echo "playwright-mcp binary not found after install under $PLAYWRIGHT_MCP_HOME/node_modules/.bin" >&2
   exit 1
 fi
 
