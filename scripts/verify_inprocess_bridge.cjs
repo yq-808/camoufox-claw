@@ -234,7 +234,7 @@ async function main() {
     undefined,
     { timeout: Math.max(8000, config.playwrightMcpStartupTimeoutMs) },
   );
-  stages.push("mcp_browser_navigate");
+  stages.push("browser_navigate");
 
   const runCode = await client.callTool(
     {
@@ -246,7 +246,7 @@ async function main() {
     undefined,
     { timeout: Math.max(8000, config.playwrightMcpStartupTimeoutMs) },
   );
-  stages.push("mcp_browser_run_code");
+  stages.push("browser_run_code");
 
   await client.close().catch(() => {});
   await server.close().catch(() => {});

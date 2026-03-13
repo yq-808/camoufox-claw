@@ -39,7 +39,7 @@ export type BrowserAction = (typeof BROWSER_ACTIONS)[number];
 export const BROWSER_ACTION_SET = new Set<string>(BROWSER_ACTIONS);
 
 export function browserToolName(browserAction: BrowserAction): string {
-  return browserAction.replace(/^browser_/, "");
+  return browserAction;
 }
 
 export function formatBrowserDescription(browserAction: BrowserAction): string {

@@ -15,7 +15,7 @@ export function validateClickToolArgs(rawToolArgs: Record<string, unknown>): voi
     : "";
   throw new Error(
     `[camoufox-claw] retryable=true: click requires params.element + params.ref from the latest snapshot; missing ${missing}.${locatorHint} `
-    + "Please call `snapshot` and retry click with both fields.",
+    + "Please call `browser_snapshot` and retry `browser_click` with both fields.",
   );
 }
 
@@ -41,15 +41,15 @@ export function formatToolError(action: string, error: string): string {
   const base = error || "camoufox operation failed";
   if (action === "browser_click" && isClickContractError(base)) {
     return `${base}\n[camoufox-claw] retryable=true: click requires params.element + params.ref. `
-      + "Retry with a fresh snapshot and pass both fields.";
+      + "Retry with a fresh browser_snapshot and pass both fields.";
   }
   if (action === "browser_click" && isRefNotFoundError(base)) {
     return `${base}\n[camoufox-claw] retryable=true: stale ref detected. `
-      + "Call snapshot first to refresh refs, then retry click with element+ref.";
+      + "Call browser_snapshot first to refresh refs, then retry browser_click with element+ref.";
   }
   if (action === "browser_click" && isClickRetryableFailure(base)) {
     return `${base}\n[camoufox-claw] retryable=true: click was blocked or timed out. `
-      + "Refresh snapshot and retry; if overlay blocks input, dismiss it before clicking.";
+      + "Refresh browser_snapshot and retry browser_click; if overlay blocks input, dismiss it before clicking.";
   }
   return base;
 }
