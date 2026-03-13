@@ -171,6 +171,17 @@ export const BROWSER_ACTION_INPUT_SCHEMAS: Partial<Record<BrowserAction, Record<
     required: ["width", "height"],
     additionalProperties: false,
   },
+  browser_run_code: {
+    type: "object",
+    properties: {
+      code: {
+        type: "string",
+        description: "JavaScript function string to execute with Playwright page, e.g. async (page) => { ... }",
+      },
+    },
+    required: ["code"],
+    additionalProperties: false,
+  },
   browser_select_option: {
     type: "object",
     properties: {

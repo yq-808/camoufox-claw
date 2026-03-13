@@ -236,6 +236,18 @@ async function main() {
   );
   stages.push("mcp_browser_navigate");
 
+  const runCode = await client.callTool(
+    {
+      name: "browser_run_code",
+      arguments: {
+        code: "async (page) => { await page.keyboard.press('End'); return await page.title(); }",
+      },
+    },
+    undefined,
+    { timeout: Math.max(8000, config.playwrightMcpStartupTimeoutMs) },
+  );
+  stages.push("mcp_browser_run_code");
+
   await client.close().catch(() => {});
   await server.close().catch(() => {});
   if (browser) await browser.close().catch(() => {});
@@ -246,6 +258,7 @@ async function main() {
     wsEndpoint,
     toolCount: tools.tools.length,
     navigateResult: nav,
+    runCodeResult: runCode,
   })}\n`);
 }
 

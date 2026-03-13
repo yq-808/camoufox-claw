@@ -18,6 +18,7 @@ export const BROWSER_ACTIONS = [
   "browser_navigate_back",
   "browser_press_key",
   "browser_resize",
+  "browser_run_code",
   "browser_select_option",
   "browser_snapshot",
   "browser_take_screenshot",
@@ -42,8 +43,11 @@ export function browserToolName(browserAction: BrowserAction): string {
 }
 
 export function formatBrowserDescription(browserAction: BrowserAction): string {
+  const runCodeExample = browserAction === "browser_run_code"
+    ? " Example params.code: async (page) => { await page.getByRole('textbox').first().click(); await page.keyboard.type('Line 1'); await page.keyboard.press('Enter'); await page.keyboard.type('Line 2'); return await page.title(); }"
+    : "";
   return [
-    `Camoufox browser operation (${browserAction}). Put operation arguments in "params".`,
+    `Camoufox browser operation (${browserAction}). Put operation arguments in "params".${runCodeExample}`,
     "Note: browser state is shared across OpenClaw sessions/channels.",
     "If the page/context appears to belong to another session, tell the user first and ask whether to continue.",
   ].join(" ");

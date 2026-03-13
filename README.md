@@ -8,7 +8,7 @@ OpenClaw plugin + daemon bridge for operating Camoufox with a single long-lived 
 - Auto-starts a local Camoufox daemon on first call.
 - Keeps one daemon/browser process and reuses it across calls.
 - Lifecycle actions are daemon-backed: `status`, `ensure`, `stop`, `restart`, `shutdown`.
-- Browser actions are Playwright MCP-backed (for example: `navigate`, `snapshot`, `take_screenshot`, `click`, `type`).
+- Browser actions are Playwright MCP-backed (for example: `navigate`, `snapshot`, `take_screenshot`, `click`, `type`, `run_code`).
 
 ## Runtime Flow
 
@@ -42,6 +42,7 @@ Deploy now also installs `@playwright/mcp` on the VM (`~/.camoufox-claw/playwrig
 2) ensure endpoint is available (`endpoint_ensure`)
 3) run in-process MCP `tools/list`
 4) run in-process MCP `browser_navigate`
+5) run in-process MCP `browser_run_code`
 
 Optional proxy:
 
